@@ -20,6 +20,7 @@ pub struct Client {
     resend_counter: usize,
     sessid: u64,
     ping_mode: bool,
+    request_delay_ms: u64,
 }
 
 struct MoshClientState {
@@ -33,6 +34,7 @@ impl Client {
         dest_sa: SocketAddr,
         crypto: XChaCha20Poly1305,
         ping_mode: bool,
+        request_delay_ms: u64,
     ) -> anyhow::Result<Client> {
         let bind_sa = match dest_sa {
             SocketAddr::V4(_) => SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)),
@@ -49,6 +51,7 @@ impl Client {
             resend_counter: 50,
             sessid: u64::from_ne_bytes(sessid),
             ping_mode,
+            request_delay_ms,
         })
     }
 
@@ -66,7 +69,11 @@ impl Client {
                 polls.push(PollFd::new(mosh.socket.as_raw_fd(), PollFlags::POLLIN));
             }
 
-            let timeout = if self.mosh.is_some() { -1 } else { 200 };
+            let timeout: i32 = if self.mosh.is_some() {
+                -1
+            } else {
+                i32::try_from(self.request_delay_ms).unwrap_or(i32::MAX)
+            };
             match poll(&mut polls[..], timeout) {
                 Err(e) => {
                     eprintln!("poll error: {}", e);
@@ -191,7 +198,7 @@ impl Client {
                 sessid: self.sessid,
             },
         };
-        
+
         let pkt = crate::protocol::encrypt(&msg, &self.crypto).unwrap();
         if let Err(e) = self.client_socket.send_to(&pkt, self.destination_address) {
             eprintln!("sendto: {}", e);
@@ -202,8 +209,8 @@ impl Client {
     fn start_mosh_client(key: String) -> anyhow::Result<MoshClientState> {
         let udp = UdpSocket::bind(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)))?;
         let port = udp.local_addr()?.port();
-        let mosh_client =
-            std::env::var_os("MOSH_CLIENT").unwrap_or_else(||OsStr::from_bytes(b"mosh-client").to_owned());
+        let mosh_client = std::env::var_os("MOSH_CLIENT")
+            .unwrap_or_else(|| OsStr::from_bytes(b"mosh-client").to_owned());
         let mut cmd = std::process::Command::new(mosh_client);
         cmd.arg("127.0.0.1").arg(format!("{}", port));
         cmd.env("MOSH_KEY", key);

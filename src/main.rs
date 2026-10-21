@@ -64,6 +64,10 @@ struct Connect {
     /// skip most of the algorithm, just send a ping
     #[argh(switch)]
     ping: bool,
+
+    /// delay in milliseconds between UDP requests (default: 200)
+    #[argh(option, default = "200")]
+    delay: u64,
 }
 
 /// generate 32-byte random file to use as a key on client and server
@@ -101,13 +105,14 @@ fn main() -> anyhow::Result<()> {
             ipv6,
             keyfile,
             ping,
+            delay,
         }) => {
             let addr = handle_addr(addr, ipv4, ipv6)?;
             let key = std::fs::read(keyfile)?;
             anyhow::ensure!(key.len() == 32);
             let crypto =
                 chacha20poly1305::XChaCha20Poly1305::new(chacha20poly1305::Key::from_slice(&key));
-            client::Client::new(addr, crypto, ping)?.connect()
+            client::Client::new(addr, crypto, ping, delay)?.connect()
         }
         Cmd::Keygen(Keygen { file }) => {
             let mut buf = [0u8; 32];
